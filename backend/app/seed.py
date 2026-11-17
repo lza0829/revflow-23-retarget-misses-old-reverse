@@ -80,6 +80,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_retarget_old_active
   ON key_retargets(old_entry_key) WHERE status = '生效';
 CREATE UNIQUE INDEX IF NOT EXISTS ux_retarget_new_active
   ON key_retargets(new_entry_key) WHERE status = '生效';
+
+-- 迁移触及冲正快照（不可变迁移边）：一次生效迁移触及的每个冲正一行。
+-- 未终态冲正（待归并/已隔离）处置=重指向，target 改新键；
+-- 已终态冲正（已归并）处置=终态留边，target 不动，仅留此可查迁移边。
+CREATE TABLE IF NOT EXISTS retarget_touches (
+  id INTEGER PRIMARY KEY,
+  retarget_id INTEGER NOT NULL REFERENCES key_retargets(id),
+  reversal_key TEXT NOT NULL,
+  from_target_key TEXT NOT NULL,
+  to_target_key TEXT NOT NULL,
+  reversal_status TEXT NOT NULL,
+  action TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_retarget_touches_retarget
+  ON retarget_touches(retarget_id);
+CREATE INDEX IF NOT EXISTS ix_retarget_touches_reversal
+  ON retarget_touches(reversal_key);
+
+-- 重指向证明实体（基线所无）：每次生效迁移一行，随迁移事务同生共死。
+-- 证明口径：旧键、新键、重指向数（未终态）、终态留边数、触及冲正键全集、
+-- 未触及键（同账户其余冲正，证明重指向范围恰好覆盖）。
+CREATE TABLE IF NOT EXISTS retarget_repoint_proofs (
+  id INTEGER PRIMARY KEY,
+  retarget_id INTEGER NOT NULL UNIQUE REFERENCES key_retargets(id),
+  settle_run_id INTEGER REFERENCES settle_runs(id),
+  old_entry_key TEXT NOT NULL,
+  new_entry_key TEXT NOT NULL,
+  repointed_count INTEGER NOT NULL,
+  terminal_edge_count INTEGER NOT NULL DEFAULT 0,
+  touched_keys_json TEXT NOT NULL,
+  untouched_keys_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
 """
 
 

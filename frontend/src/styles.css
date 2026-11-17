@@ -399,6 +399,11 @@ tbody tr:hover { background: rgba(36, 87, 197, 0.04); }
 .btn.secondary:hover {
   background: rgba(36, 87, 197, 0.08);
 }
+.btn.btn-mini {
+  padding: 4px 10px;
+  font-size: 12px;
+  letter-spacing: 0;
+}
 
 .msg { color: var(--danger); margin: 8px 0; }
 .ok { color: var(--ok); margin: 8px 0; }

@@ -26,13 +26,19 @@ function yuan(cents) {
     <div class="panel">
       <table>
         <thead>
-          <tr><th>流水键</th><th>迁移前键</th><th>迁移后键</th><th>账户</th><th>金额（元）</th><th>业务单</th><th>状态</th><th>入账时间</th></tr>
+          <tr><th>流水键</th><th>迁移前键</th><th>迁移后键</th><th>迁移/证明</th><th>账户</th><th>金额（元）</th><th>业务单</th><th>状态</th><th>入账时间</th></tr>
         </thead>
         <tbody>
           <tr v-for="e in rows" :key="e.id">
             <td class="mono">{{ e.entry_key }}</td>
             <td class="mono muted">{{ e['迁移前键'] || '—' }}</td>
             <td class="mono muted">{{ (e['迁移后键'] || []).join('、') || '—' }}</td>
+            <td class="mono muted">
+              <template v-if="e['重指向证明id']">
+                迁移 #{{ e['迁移id'] }} / 证明 #{{ e['重指向证明id'] }}
+              </template>
+              <template v-else>—</template>
+            </td>
             <td>{{ e.account_code }}</td>
             <td>{{ yuan(e.amount_cents) }}</td>
             <td>{{ e.biz_ref }}</td>

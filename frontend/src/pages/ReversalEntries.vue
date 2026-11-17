@@ -26,7 +26,7 @@ function yuan(cents) {
     <div class="panel">
       <table>
         <thead>
-          <tr><th>流水键</th><th>账户</th><th>金额（元）</th><th>当前原单键</th><th>迁移前原单键</th><th>业务单</th><th>状态</th></tr>
+          <tr><th>流水键</th><th>账户</th><th>金额（元）</th><th>当前原单键</th><th>迁移前原单键</th><th>重指向处置</th><th>重指向证明</th><th>业务单</th><th>状态</th></tr>
         </thead>
         <tbody>
           <tr v-for="e in rows" :key="e.id">
@@ -35,6 +35,18 @@ function yuan(cents) {
             <td>{{ yuan(e.amount_cents) }}</td>
             <td class="mono">{{ e.target_entry_key || '—' }}</td>
             <td class="mono muted">{{ e['目标迁移前键'] || '—' }}</td>
+            <td>
+              <span v-if="e['重指向处置']" class="tag" :class="{ on: e['重指向处置'] === '重指向' }">
+                {{ e['重指向处置'] }}
+              </span>
+              <template v-else>—</template>
+            </td>
+            <td class="mono muted">
+              <template v-if="e['重指向证明id']">
+                迁移 #{{ e['迁移id'] }} / 证明 #{{ e['重指向证明id'] }}
+              </template>
+              <template v-else>—</template>
+            </td>
             <td>{{ e.biz_ref }}</td>
             <td>
               <span

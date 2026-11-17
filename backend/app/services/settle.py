@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from app.db import connect, rows_to_dicts
-from app.modules.reverse_retarget import family_exposure, family_maps
+from app.modules.reverse_retarget import family_maps
 
 
 def _now() -> str:
@@ -72,6 +72,34 @@ def list_entries(kind: str | None = None) -> list[dict]:
         new_to_olds: dict[str, list[str]] = {}
         for o, n in old_to_new.items():
             new_to_olds.setdefault(n, []).append(o)
+        # 证明同源：冲正被哪次迁移触及（迁移边 retarget_touches，只读不另造口径）
+        touch_map = {
+            r["reversal_key"]: dict(r)
+            for r in conn.execute(
+                """
+                SELECT t.retarget_id, t.reversal_key, t.from_target_key,
+                       t.to_target_key, t.action, p.id AS proof_id
+                FROM retarget_touches t
+                JOIN retarget_repoint_proofs p ON p.retarget_id = t.retarget_id
+                """
+            ).fetchall()
+        }
+        # 正向键被哪次生效迁移并入（证明 id 与迁移记录同源）
+        proof_by_retarget = {
+            r["retarget_id"]: r["id"]
+            for r in conn.execute("SELECT id, retarget_id FROM retarget_repoint_proofs").fetchall()
+        }
+        retarget_rows = conn.execute(
+            "SELECT id, old_entry_key, new_entry_key FROM key_retargets WHERE status = '生效'"
+        ).fetchall()
+        forward_proof: dict[str, dict] = {}
+        for rr in retarget_rows:
+            payload = {
+                "迁移id": rr["id"],
+                "重指向证明id": proof_by_retarget.get(rr["id"]),
+            }
+            forward_proof[rr["old_entry_key"]] = payload
+            forward_proof.setdefault(rr["new_entry_key"], payload)
         for e in rows:
             # 迁移前后键（来源：key_retargets 生效边），页面同源可查
             e["迁移前键"] = "、".join(new_to_olds.get(e["entry_key"], []))
@@ -82,6 +110,17 @@ def list_entries(kind: str | None = None) -> list[dict]:
                 )
             else:
                 e["目标迁移前键"] = ""
+            # 重指向证明字段：与迁移记录、流水同源（迁移边 + 证明实体，非页面文案）
+            if e["kind"] == "冲正":
+                touch = touch_map.get(e["entry_key"])
+                e["重指向证明id"] = touch["proof_id"] if touch else None
+                e["迁移id"] = touch["retarget_id"] if touch else None
+                e["重指向处置"] = touch["action"] if touch else ""
+                e["重指向改前键"] = touch["from_target_key"] if touch else ""
+            else:
+                fp = forward_proof.get(e["entry_key"])
+                e["重指向证明id"] = fp["重指向证明id"] if fp else None
+                e["迁移id"] = fp["迁移id"] if fp else None
         return rows
 
 
@@ -142,10 +181,19 @@ def run_settle() -> dict:
             for r in conn.execute("SELECT * FROM ledger_entries WHERE kind = '正向'").fetchall()
         }
 
-        # 每个正向家族已占用冲正额度（含历史轮已归并冲正，与 family_exposure 同源）
+        # 每个正向家族已占用冲正额度（含历史轮已归并冲正，与 family_exposure 同源）。
+        # 只统计不会在本轮重处理的已终态（已归并）冲正：待归并冲正将在下方循环中
+        # 逐笔累加，预先计入会双重占用额度，把足额冲正误判成「冲正超额」隔离。
         used: dict[str, int] = {}
         for head in members:
-            used[head] = family_exposure(conn, head, members)["reversed_cents"]
+            keys = members[head]
+            placeholders = ",".join("?" for _ in keys)
+            used[head] = conn.execute(
+                f"SELECT COALESCE(SUM(amount_cents),0) AS s FROM ledger_entries "
+                f"WHERE kind = '冲正' AND status = '已归并' "
+                f"AND target_entry_key IN ({placeholders})",
+                keys,
+            ).fetchone()["s"]
         settled = 0
         quarantined = 0
 
@@ -186,7 +234,12 @@ def run_settle() -> dict:
                 quarantined += 1
                 continue
 
-            quota = fwd["amount_cents"]
+            # 家族共享正向额度：成员（新键头 + 并入旧键）正向额度合计，
+            # 与 family_exposure 同源；配额按全家族算，不能只看头键单笔
+            family_keys = members.get(head, [head])
+            quota = sum(
+                all_forwards[k]["amount_cents"] for k in family_keys if k in all_forwards
+            )
             remain = quota - used.get(head, 0)
             if r["amount_cents"] > remain:
                 conn.execute(
